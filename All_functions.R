@@ -13,6 +13,7 @@ raw<-read_xlsx("Raw_blanks.xlsx")
 #Specimen names should be first col of spreadsheet
 #Ontogenetic characters should be col names of spreadsheet
 #Missing entries should be blanks in spreadsheet. If they are character strings, they may cause the columns to convert to character
+
 Create_OSA_df<-function(DF){
   #Initiate empty list to begin building OSA df
   OSA_data<-list()
@@ -30,6 +31,7 @@ Create_OSA_df<-function(DF){
 
 
 ##Insert a hypothetical Most/Least Mature Semaphoront as needed
+
 End_members<-function(DF){
   #Extract numeric data columns
   num<-DF$Working[,-1,drop=F]
@@ -63,6 +65,7 @@ End_members<-function(DF){
 
 
 ##Subfunction to find potentially equivalent semaphoronts
+
 rows_equivalent<-function(r1,r2){
   #Vectorize data columns of each row being compared
   v1<-as.numeric(r1[-1])
@@ -73,6 +76,7 @@ rows_equivalent<-function(r1,r2){
 }
 
 ##Subfunction to fully consolidate semaphoront equivalence clique, with proper nomenclature
+
 merge_group<-function(group_df){
   parent_names<-group_df[[1]]
   #Ensure data columns are numeric
@@ -101,6 +105,7 @@ merge_group<-function(group_df){
 
 
 ##Subfunction to find equivalence cliques, allowing semaphoronts to occupy multiple cliques as needed
+
 find_cliques<-function(df){
   n<-nrow(df)
   #Initiate pairwise equivalence matrix
@@ -140,6 +145,7 @@ find_cliques<-function(df){
 
 
 ##Consolidate equivalent incomplete individuals into maximally resolved semaphoronts
+
 Consolidate<-function(DF){
   #Sort semaphoronts by equivalence allowing them to occupy multiple cliques
   groups<-find_cliques(DF$Working)
@@ -164,6 +170,7 @@ Consolidate<-function(DF){
 
 
 ##Permute remaining incomplete semaphoronts into min/max maturity variants
+
 Permute<-function(DF){
   #Isolate incomplete semaphoronts
   incompletes<-DF$Working[apply(is.na(DF$Working[,-1]),1,any),]
@@ -208,38 +215,51 @@ Permute<-function(DF){
 
 
 
-#Find all edges not requiring event reversals
+##Find all edges not requiring event reversals (now handles multistate characters)
+
 allowed_edges<-function(DF){
   #Isolate semaphoront names
   sems<-DF$Working[,1]
-  #Isolate event scores
+  #Isolate event scores as numeric matrix
   values<-as.matrix(DF$Working[,-1])
   
-  #Find all unique row pairs (i < j)
+  #Find all unique row pairs (i<j)
   pairs<-combn(seq_len(nrow(DF$Working)),2)
   
-  #Create edges consisting of "From" and "To" semaphoronts
-  #and calculate developmental events
-  result<-lapply(seq_len(ncol(pairs)),function(k){
-    i<-pairs[1,k]
-    j<-pairs[2,k]
+  #Filter out pairs where any "From" value exceeds the corresponding "To" value
+  #(i.e., where a reversal occurs: values[i,]>values[j,])
+  valid_indices<-apply(pairs,2,function(k){
+    i<-k[1]
+    j<-k[2]
+    !any(values[i,]>values[j,])
+  })
+  
+  #Keep only semaphoront pairs not involving reversals
+  valid_pairs<-pairs[,valid_indices,drop=F]
+  
+  #Create edges and calculate character state changes (To-From)
+  #Maybe can use this later to track changes. For now, it's only used to calc distances
+  result<-lapply(seq_len(ncol(valid_pairs)),function(k){
+    i<-valid_pairs[1,k]
+    j<-valid_pairs[2,k]
     c(From=sems[i],To=sems[j],values[j,]-values[i,])
   })
   
   #Bind results into a data frame
   Edge.Matrix<-as.data.frame(do.call(rbind,result),stringsAsFactors=F)
+  
   #Convert event columns back to numeric
   Edge.Matrix[,-(1:2)]<-lapply(Edge.Matrix[,-(1:2)],as.numeric)
-  #Prune edges involving reversals by removing any containing -1 values
-  DF$Edges<-Edge.Matrix[rowSums(Edge.Matrix==-1)==0,,drop=F]
-  #Calculate edge weights (semaphoront distances) and add as third column
-  #Separate character from numeric columns
+  DF$Edges<-Edge.Matrix
+  
+  #Calculate edge weights (semaphoront distances)
   edges<-DF$Edges[,1:2,drop=F]
   differences<-DF$Edges[,3:ncol(DF$Edges),drop=F]
-  #Compute row-wise sum of numeric columns (edge weights)
   distances<-rowSums(differences)
-  #rebind columns and create "Distance" column
+  
+  #Rebind columns and insert "Distance" column
   DF$Edges<-cbind(edges,Distance=distances,differences)
+  
   return(DF)
 }
 
@@ -247,6 +267,7 @@ allowed_edges<-function(DF){
 
 
 ##Find shortest edges - combined Up and Down passes
+
 nearest_neighbors<-function(DF){
   #Split edges by "from" vertex
   From<-split(DF$Edges,DF$Edges[[1]])
@@ -275,6 +296,8 @@ nearest_neighbors<-function(DF){
 
 
 ##Find and remove remaining unnecessary edges
+  #This step may prove to be unnecessary going forward
+
 clean_up<-function(DF){
   #Helper to get counts of occurrences in specific columns
   get_counts<-function(data){
@@ -310,6 +333,7 @@ clean_up<-function(DF){
 
 
 ##Apply all edge finding subfunctions
+
 Edges<-function(DF){
   DF<-allowed_edges(DF)
   DF<-nearest_neighbors(DF)
@@ -318,8 +342,8 @@ Edges<-function(DF){
 }
 
 
-
 ##Subfunction to find predicted semaphoronts
+
 optimize<-function(DF){
   data_vals<-DF$Working[,-1]
   rownames(data_vals)<-DF$Working[[1]]
@@ -406,6 +430,7 @@ optimize<-function(DF){
 
 
 ##Semaphoront prediction
+
 Predict_sems<-function(DF){
   repeat{
     old_vertex_count<-nrow(DF$Working)
@@ -431,7 +456,8 @@ Predict_sems<-function(DF){
 
 
 ##Calculate whole and partial semaphoront weights
-#This one takes a while and can maybe be made more efficient
+  #This one takes a while and can maybe be made more efficient
+
 Sem_weights<-function(DF){
   #Identify character strings indicating hypothetical semaphoronts
   key<-"^(HMM|HLM|max|min)"
@@ -510,6 +536,7 @@ Sem_weights<-function(DF){
 
 
 ##Find modal sequence and output a list of vertices w sequences ordered by sample frequency
+
 Modal_seq<-function(DF,from_v,to_v){
   #load igraph
   if(!require("igraph")){
@@ -548,9 +575,157 @@ Modal_seq<-function(DF,from_v,to_v){
 }
 
 
+##Function to break supergraph into smallest spanning subgraphs
+  #This step is used to identify the minimum amount of ontogenetic sequence polymorphism possible given the semaphoront data
 
+Generate_spanning_subgraphs<-function(DF){
+  #STEP 1: Decompose supergraph into edge-disjoint subgraphs to reduce computation load
+  decompositions<-list()
+  #Temporarily extract supergraph
+  supergraph<-DF$Edges
+  
+  while(nrow(supergraph)>0){
+    current_indices<-1
+    
+    #Track 'From' and 'To' vertices independently
+    current_from<-supergraph$From[1]
+    current_to<-supergraph$To[1]
+    
+    repeat{
+      #Identify remaining unselected edges
+      remaining_indices<-setdiff(seq_len(nrow(supergraph)),current_indices)
+      if(length(remaining_indices)==0)break
+      
+      #Match only From-From or To-To to retrieve non-transitively adjacent edge paths
+      new_matches<-remaining_indices[
+        (supergraph$From[remaining_indices] %in% current_from)|
+          (supergraph$To[remaining_indices] %in% current_to)
+      ]
+      
+      #Stop if no additional edges connect
+      if(length(new_matches)==0)break
+      
+      #Add newly discovered edge indices
+      current_indices<-c(current_indices,new_matches)
+      #Expand known From and To vertex sets with new matches
+      current_from<-unique(c(current_from,supergraph$From[new_matches]))
+      current_to<-unique(c(current_to,supergraph$To[new_matches]))
+    }
+    
+    #Extract the connected component as a data frame list element
+    decompositions[[length(decompositions)+1]]<-supergraph[current_indices,,drop=F]
+    #Remove extracted edges from supergraph without replacement
+    supergraph<-supergraph[-current_indices,,drop=F]
+  }
+  
+  #STEP 2: Find subsets of edges that provide the fewest routes thru each part of the supergraph
+  combinations<-list()
+  
+  if(length(decompositions)>0){
+    for(s in seq_along(decompositions)){
+      parts<-decompositions[[s]]
+      n_edges<-nrow(parts)
+      
+      #Skip parts with 2 or fewer edges (processed in Step 3)
+      if(n_edges<=2)next
+      
+      #Identify all target unique 'From' and 'To' vertices in the parent parts
+      sub_from_unique<-unique(parts$From)
+      sub_to_unique<-unique(parts$To)
+      
+      #Starting value of m = max(unique 'From', unique 'To')
+      m<-max(length(sub_from_unique),length(sub_to_unique))
+      valid_combinations<-list()
+      
+      #Incrementally increase m until valid edge combinations are found or m>n_edges
+      while(m<=n_edges && length(valid_combinations)==0){
+        comb_indices<-combn(n_edges,m)
+        
+        #Evaluate combinations for current m
+        for(col_idx in seq_len(ncol(comb_indices))){
+          selected_rows<-comb_indices[,col_idx]
+          combo_df<-parts[selected_rows,,drop=F]
+          
+          #Check vertex coverage criterion
+          has_all_from<-all(sub_from_unique %in% combo_df$From)
+          has_all_to<-all(sub_to_unique %in% combo_df$To)
+          
+          if(has_all_from && has_all_to){
+            valid_combinations[[length(valid_combinations)+1]]<-combo_df
+          }
+        }
+        
+        #If no valid combinations found at size m, increment m for the next iteration
+        if(length(valid_combinations)==0){
+          m<-m+1
+        }
+      }
+      
+      #Store results for this supergraph part
+      if(length(valid_combinations)>0){
+        combinations[[paste0("Subgraph_",s)]]<-list(
+          final_m=m,
+          valid_combinations=valid_combinations
+        )
+      }
+    }
+  }
+  
+  #STEP 3: Form pools and compute Cartesian Product for final spanning subgraphs
+  pools<-list()
+  #Gather all small decompositions (<= 2 edges) into a single fixed edge list
+  small_subgraph_edges<-list()
+  
+  #If small subgraphs exist, combine them into one edge list (Pool 1)
+  if(length(decompositions)>0){
+    for(s in seq_along(decompositions)){
+      sg<-decompositions[[s]]
+      if(nrow(sg)<=2){
+        small_subgraph_edges[[length(small_subgraph_edges)+1]]<-sg
+      }
+    }
+  }
+  
+  if(length(small_subgraph_edges)>0){
+    combined_small<-do.call(rbind,small_subgraph_edges)
+    pools[["Fixed_Small_Subgraphs"]]<-list(combined_small)
+  }
+  
+  #Add the valid combinations from each large subgraph as additional pools
+  if(length(combinations)>0){
+    for(subgraph_name in names(combinations)){
+      pools[[subgraph_name]]<-combinations[[subgraph_name]]$valid_combinations
+    }
+  }
+  
+  if(length(pools)==0){
+    warning("No valid subgraph combinations were found.")
+    DF$Spanning_subgraphs<-list()
+    return(DF)
+  }
+  
+  #Calculate Cartesian Product and generate spanning subgraphs
+  pool_sizes<-sapply(pools,length)
+  idx_grid<-expand.grid(lapply(pool_sizes,seq_len))
+  
+  #Construct complete spanning subgraph edge lists from each Cartesian product pool
+  full_graphs<-lapply(seq_len(nrow(idx_grid)),function(r){
+    graph_parts<-lapply(seq_along(pools),function(p){
+      selected_comb_idx<-idx_grid[r,p]
+      pools[[p]][[selected_comb_idx]]
+    })
+    do.call(rbind,graph_parts)
+  })
+  
+  #Output just spanning subgraphs
+  DF$Spanning_subgraphs<-full_graphs
+  return(DF)
+}
+
+                    
 
 ##Function to plot graph
+
 Plot_OSA<-function(DF){
   #1. Setup
   #Extract semaphoront names and number them
