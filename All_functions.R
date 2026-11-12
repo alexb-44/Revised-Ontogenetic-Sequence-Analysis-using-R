@@ -4,9 +4,9 @@ library(readxl)
 raw<-read_xlsx("Raw_blanks.xlsx")
 
 ##Notes:
-#May want to add a function that binarizes the working matrix for you so that the input raw matrix can 
-  #contain multistate characters for ease of scoring individuals
-#Can also have it interpret "?" and other non-integers as NA
+#Can automatically interpret "?" and other non-integers as NA in future
+#Current Permute() function turns incomplete semaphoronts into a least and most mature possible variant
+  #similar to how OSA treats them.
 
 
 ##Set up working data frame for entire analysis. Use this object in each function (DF)
